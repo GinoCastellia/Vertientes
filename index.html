@@ -220,7 +220,7 @@
             const prompt = document.getElementById('config-prompt');
             prompt.innerHTML = `<i class="fas fa-exclamation-triangle mr-2"></i> ${message}`;
             prompt.classList.remove('hidden');
-            // The following line is the fix: I've commented it out so the inputs are NOT disabled.
+            // FIX: This line was preventing the initial admin login for configuration. It's now removed.
             // document.querySelectorAll('#login-form button, #register-form button, #login-form input, #register-form input').forEach(el => el.disabled = true);
         }
 
@@ -277,7 +277,7 @@
                 await authFunc(auth, email, password);
             } catch (error) {
                 if (email.toLowerCase() === ADMIN_EMAIL && !localStorage.getItem('firebaseConfig')) {
-                    initializeAppUI('administrador_condominio'); 
+                    initializeAppUI('administrador_condominio', true); // Pass true for pre-config state
                     showAlert('Inicia sesión para configurar la aplicación.', 'warning');
                 } else {
                     errorP.textContent = "Error: " + error.code.replace('auth/', '').replace(/-/g, ' ');
@@ -307,18 +307,24 @@
         };
         const roleNames = { administrador_condominio: 'Admin', comite: 'Comité', mayordomo: 'Mayordomo', jardineria: 'Jardinería' };
         
-        function initializeAppUI(role) {
+        function initializeAppUI(role, isPreConfig = false) {
             loginScreen.classList.add('hidden');
             appWrapper.classList.remove('hidden');
             const userEmail = auth?.currentUser?.email || ADMIN_EMAIL;
             document.getElementById('userIdDisplay').textContent = `${roleNames[role]} (${userEmail.split('@')[0]})`;
+            
             document.querySelectorAll('.nav-link').forEach(link => {
-                link.style.display = permissions[role]?.includes(link.dataset.module) ? 'flex' : 'none';
+                const module = link.dataset.module;
+                const isAllowed = isPreConfig ? module === 'admin' : permissions[role]?.includes(module);
+                link.style.display = isAllowed ? 'flex' : 'none';
             });
-            const firstLink = document.querySelector('.nav-link[style*="display: flex"]');
-            if (firstLink) window.location.hash = firstLink.getAttribute('href'); else navigate();
+
+            const firstLink = isPreConfig ? '#admin' : document.querySelector('.nav-link[style*="display: flex"]')?.getAttribute('href');
+            if (firstLink) window.location.hash = firstLink;
+            
+            navigate();
             loadAllModulesContent(role);
-            initializeAppListeners(role);
+            initializeAppListeners(role, isPreConfig);
         }
 
         // --- DYNAMIC CONTENT & LISTENERS ---
@@ -344,7 +350,13 @@
             ].join('');
         }
 
-        function initializeAppListeners(role) {
+        function initializeAppListeners(role, isPreConfig = false) {
+            // FIX: Guard to prevent running listeners if db is not initialized.
+            if (isPreConfig || !db) {
+                if (role === 'administrador_condominio') setupAdminListeners();
+                return;
+            }
+
             document.getElementById('current-date').textContent = new Date().toLocaleString('es-ES', { dateStyle: 'full' });
             const allowed = permissions[role] || [];
             if (allowed.includes('admin')) setupAdminListeners();
@@ -373,7 +385,13 @@
         function getTareasTemplate() { return `<div class="flex justify-end mb-6"><button onclick="showModal('tareaModal')" class="btn-primary py-2 px-4"><i class="fas fa-plus mr-2"></i>Nueva Tarea</button></div><div class="grid grid-cols-1 md:grid-cols-3 gap-6"><div><h3 class="font-semibold text-lg mb-3 pb-2 border-b-2 border-pink-400">Por Hacer</h3><div id="tasks-todo" class="space-y-4 min-h-[200px]"></div></div><div><h3 class="font-semibold text-lg mb-3 pb-2 border-b-2 border-yellow-400">En Progreso</h3><div id="tasks-inprogress" class="space-y-4 min-h-[200px]"></div></div><div><h3 class="font-semibold text-lg mb-3 pb-2 border-b-2 border-green-400">Completado</h3><div id="tasks-completed" class="space-y-4 min-h-[200px]"></div></div></div>`; }
         function getGenericListTemplate(title, id, listClass) { return `<div class="flex justify-end mb-6"><button onclick="showModal('${id}Modal')" class="btn-primary py-2 px-4"><i class="fas fa-plus mr-2"></i>Añadir</button></div><div id="${id}-list" class="${listClass}"></div>`; }
         function getAdminTemplate() { return `<div class="grid grid-cols-1 lg:grid-cols-2 gap-6"><div class="card p-6"><div class="flex justify-between items-center mb-4"><h3 class="text-xl font-bold">Gestión de Usuarios</h3><button onclick="showModal('user-modal')" class="btn-primary py-2 px-4"><i class="fas fa-user-plus mr-2"></i>Invitar</button></div><div id="user-list" class="space-y-3"></div></div><div class="card p-6"><h3 class="text-xl font-bold mb-4">Configuración de Conexión</h3><form id="firebase-config-form"><p class="text-sm mb-2 text-slate-600 dark:text-slate-300">Pega aquí el objeto de configuración de tu proyecto de Firebase.</p><textarea id="firebase-config-input" rows="10" class="form-input w-full font-mono text-xs" placeholder="{\n  apiKey: '...',\n  authDomain: '...',\n  ...\n}"></textarea><div class="flex justify-end mt-4"><button type="submit" class="btn-primary py-2 px-4">Guardar y Recargar</button></div></form></div></div>`; }
-        function getJardineriaTemplate() { return `<div class="card p-6"><div class="flex flex-col sm:flex-row justify-between items-center mb-4 gap-4"><div class="flex items-center gap-3"><label for="map-selector" class="font-semibold">Mapa:</label><select id="map-selector" class="form-input rounded-lg"></select><button id="delete-map-btn" class="text-red-500 hover:text-red-700 hidden p-2"><i class="fas fa-trash-alt"></i></button></div><button id="show-map-modal-btn" class="btn-primary py-2 px-4 hidden"><i class="fas fa-plus mr-2"></i>Cargar Mapa</button></div><div class="relative"><div id="map-container" class="rounded-2xl shadow-inner overflow-hidden relative flex items-center justify-center"><img id="map-image" class="hidden"/><div id="marker-layer"></div><div id="map-placeholder" class="text-center text-slate-500"><i class="fas fa-map-marked-alt text-5xl mb-4"></i><p>Selecciona un mapa para empezar.</p></div></div><div id="map-legend" class="absolute bottom-4 left-4 card !rounded-xl p-3 text-xs space-y-2 hidden"><h4 class="font-bold text-sm mb-1">Leyenda</h4><div class="flex items-center gap-2"><div class="w-4 h-4 rounded-full bg-red-500 border border-white/50"></div><span>Pendiente</span></div><div class="flex items-center gap-2"><div class="w-4 h-4 rounded-full bg-green-500 border border-white/50"></div><span>Realizado (0-7d)</span></div><div class="flex items-center gap-2"><div class="w-4 h-4 rounded-full bg-yellow-400 border border-white/50"></div><span>Realizado (8-14d)</span></div><div class="flex items-center gap-2"><div class="w-4 h-4 rounded-full bg-orange-400 border border-white/50"></div><span>Realizado (15-30d)</span></div><div class="flex items-center gap-2"><div class="w-4 h-4 rounded-full" style="background-color: #A52A2A;"></div><span>Realizado (>30d)</span></div></div></div></div>`; }
+        function getJardineriaTemplate() { 
+            if (!document.getElementById('mapModal')) {
+                 const mapModalHTML = `<div id="mapModal" class="modal-backdrop fixed inset-0 flex items-center justify-center hidden"><div class="card w-11/12 md:w-1/3 p-6"><h3 class="text-xl font-semibold mb-4">Cargar Nuevo Mapa</h3><form id="map-form" class="space-y-4"><div><label>Nombre del Mapa</label><input type="text" id="map-name" class="form-input w-full" required></div><div><label>Archivo de Imagen (JPG, PNG)</label><input type="file" id="map-file" class="form-input w-full" accept="image/jpeg, image/png" required></div><div class="flex justify-end gap-4"><button type="button" onclick="hideModal('mapModal')" class="bg-gray-200 dark:bg-gray-600 p-2 rounded-lg">Cancelar</button><button type="submit" class="btn-primary p-2">Cargar</button></div></form></div></div>`;
+                 document.getElementById('genericModalContainer').insertAdjacentHTML('beforeend', mapModalHTML);
+            }
+            return `<div class="card p-6"><div class="flex flex-col sm:flex-row justify-between items-center mb-4 gap-4"><div class="flex items-center gap-3"><label for="map-selector" class="font-semibold">Mapa:</label><select id="map-selector" class="form-input rounded-lg"></select><button id="delete-map-btn" class="text-red-500 hover:text-red-700 hidden p-2"><i class="fas fa-trash-alt"></i></button></div><button id="show-map-modal-btn" onclick="showModal('mapModal')" class="btn-primary py-2 px-4 hidden"><i class="fas fa-plus mr-2"></i>Cargar Mapa</button></div><div class="relative"><div id="map-container" class="rounded-2xl shadow-inner overflow-hidden relative flex items-center justify-center"><img id="map-image" class="hidden"/><div id="marker-layer"></div><div id="map-placeholder" class="text-center text-slate-500"><i class="fas fa-map-marked-alt text-5xl mb-4"></i><p>Selecciona un mapa para empezar.</p></div></div><div id="map-legend" class="absolute bottom-4 left-4 card !rounded-xl p-3 text-xs space-y-2 hidden"><h4 class="font-bold text-sm mb-1">Leyenda</h4><div class="flex items-center gap-2"><div class="w-4 h-4 rounded-full bg-red-500 border border-white/50"></div><span>Pendiente</span></div><div class="flex items-center gap-2"><div class="w-4 h-4 rounded-full bg-green-500 border border-white/50"></div><span>Realizado (0-7d)</span></div><div class="flex items-center gap-2"><div class="w-4 h-4 rounded-full bg-yellow-400 border border-white/50"></div><span>Realizado (8-14d)</span></div><div class="flex items-center gap-2"><div class="w-4 h-4 rounded-full bg-orange-400 border border-white/50"></div><span>Realizado (15-30d)</span></div><div class="flex items-center gap-2"><div class="w-4 h-4 rounded-full" style="background-color: #A52A2A;"></div><span>Realizado (>30d)</span></div></div></div></div>`; 
+        }
         
         // GENERIC LISTENERS & RENDERERS
         function setupGenericListeners(id, collectionName, cardRenderer) {
@@ -403,20 +421,32 @@
         // SPECIFIC MODULE LISTENERS
         function setupAdminListeners() {
             const userList = document.getElementById('user-list');
-            const unsub = onSnapshot(collection(db, "users"), (snapshot) => {
-                if(!userList) return;
-                userList.innerHTML = snapshot.docs.map(doc => {
-                    const user = doc.data();
-                    return `<div class="flex justify-between items-center p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700"><span>${user.email} <span class="text-xs font-semibold bg-indigo-200 dark:bg-indigo-800 p-1 rounded">${roleNames[user.role]}</span></span><button class="text-red-500 hover:text-red-700 p-1" onclick="window.deleteUser('${doc.id}')"><i class="fas fa-trash-alt"></i></button></div>`;
-                }).join('');
-            });
-            unsubscribeListeners.push(unsub);
+            if (db) { // Only listen if db is available
+                const unsub = onSnapshot(collection(db, "users"), (snapshot) => {
+                    if(!userList) return;
+                    userList.innerHTML = snapshot.docs.map(doc => {
+                        const user = doc.data();
+                        const isCurrentUser = auth.currentUser && auth.currentUser.uid === doc.id;
+                        const deleteButton = isCurrentUser ? '' : `<button class="text-red-500 hover:text-red-700 p-1" onclick="window.deleteUser('${doc.id}')"><i class="fas fa-trash-alt"></i></button>`;
+                        return `<div class="flex justify-between items-center p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700"><span>${user.email} <span class="text-xs font-semibold bg-indigo-200 dark:bg-indigo-800 p-1 rounded">${roleNames[user.role]}</span></span>${deleteButton}</div>`;
+                    }).join('');
+                });
+                unsubscribeListeners.push(unsub);
+            }
             
+            window.deleteUser = (userId) => {
+                 showConfirmationModal('¿Seguro que quieres eliminar este usuario? Esta acción no se puede deshacer.', async () => {
+                    await deleteDoc(doc(db, "users", userId));
+                    showAlert('Usuario eliminado de la base de datos.');
+                 });
+            };
+
             document.getElementById('firebase-config-form')?.addEventListener('submit', e => {
                 e.preventDefault();
                 const configInput = document.getElementById('firebase-config-input');
                 try {
-                    JSON.parse(configInput.value); // Validate JSON
+                    const parsed = JSON.parse(configInput.value);
+                    if (!parsed.apiKey || !parsed.authDomain) throw new Error("Missing key properties");
                     localStorage.setItem('firebaseConfig', configInput.value);
                     showAlert('Configuración guardada. La página se recargará.');
                     setTimeout(() => window.location.reload(), 1500);
@@ -432,6 +462,7 @@
                 await setDoc(doc(db, "invitations", email), { role });
                 showAlert(`Invitación enviada a ${email}.`);
                 hideModal('user-modal');
+                e.target.reset();
             });
         }
 
@@ -463,9 +494,9 @@
         function setupTareasListeners() {
             const unsub = onSnapshot(collection(db, "tareas"), (snapshot) => {
                 const tasks = snapshot.docs.map(doc => ({id: doc.id, ...doc.data()}));
-                document.getElementById('tasks-todo').innerHTML = tasks.filter(t => t.status === 'todo').map(createTaskCard).join('');
-                document.getElementById('tasks-inprogress').innerHTML = tasks.filter(t => t.status === 'in-progress').map(createTaskCard).join('');
-                document.getElementById('tasks-completed').innerHTML = tasks.filter(t => t.status === 'completed').map(createTaskCard).join('');
+                document.getElementById('tasks-todo').innerHTML = tasks.filter(t => t.status === 'todo' || !t.status).map(createTaskCard).join('') || '<p class="text-center text-slate-500">Nada por aquí.</p>';
+                document.getElementById('tasks-inprogress').innerHTML = tasks.filter(t => t.status === 'in-progress').map(createTaskCard).join('') || '<p class="text-center text-slate-500">Nada por aquí.</p>';
+                document.getElementById('tasks-completed').innerHTML = tasks.filter(t => t.status === 'completed').map(createTaskCard).join('') || '<p class="text-center text-slate-500">Nada por aquí.</p>';
             });
             unsubscribeListeners.push(unsub);
             
@@ -482,17 +513,144 @@
         }
         function createTaskCard(task) {
             const priorityColors = { baja: 'bg-blue-200 text-blue-800', media: 'bg-yellow-200 text-yellow-800', alta: 'bg-red-200 text-red-800' };
-            return `<div class="card p-4"><div class="flex justify-between items-start"><div><h4 class="font-bold">${task.titulo}</h4><p class="text-xs text-slate-500">${task.asignado}</p></div><span class="text-xs font-bold px-2 py-1 rounded-full ${priorityColors[task.prioridad]}">${task.prioridad}</span></div><p class="text-sm mt-2">${task.descripcion}</p><p class="text-xs text-right mt-2 font-semibold">${task.fecha_limite}</p><div class="mt-2 pt-2 border-t flex gap-2">${task.status !== 'todo' ? `<button onclick="window.updateTaskStatus('${task.id}', 'todo')" class="text-xs p-1">To-Do</button>`:''}${task.status !== 'in-progress' ? `<button onclick="window.updateTaskStatus('${task.id}', 'in-progress')" class="text-xs p-1">Progreso</button>`:''}${task.status !== 'completed' ? `<button onclick="window.updateTaskStatus('${task.id}', 'completed')" class="text-xs p-1">Completar</button>`:''}</div></div>`;
+            return `<div class="card p-4"><div class="flex justify-between items-start"><div><h4 class="font-bold">${task.titulo}</h4><p class="text-xs text-slate-500">${task.asignado}</p></div><span class="text-xs font-bold px-2 py-1 rounded-full ${priorityColors[task.prioridad]}">${task.prioridad}</span></div><p class="text-sm mt-2">${task.descripcion}</p><p class="text-xs text-right mt-2 font-semibold">${task.fecha_limite}</p><div class="mt-2 pt-2 border-t flex gap-2 justify-end">${task.status !== 'todo' ? `<button onclick="window.updateTaskStatus('${task.id}', 'todo')" class="text-xs p-1 hover:bg-slate-200 dark:hover:bg-slate-700 rounded">Por Hacer</button>`:''}${task.status !== 'in-progress' ? `<button onclick="window.updateTaskStatus('${task.id}', 'in-progress')" class="text-xs p-1 hover:bg-slate-200 dark:hover:bg-slate-700 rounded">En Progreso</button>`:''}${task.status !== 'completed' ? `<button onclick="window.updateTaskStatus('${task.id}', 'completed')" class="text-xs p-1 hover:bg-slate-200 dark:hover:bg-slate-700 rounded">Completar</button>`:''}</div></div>`;
         }
         window.updateTaskStatus = (id, status) => updateDoc(doc(db, 'tareas', id), { status });
 
 
         function setupJardineriaListeners(role) {
             const canManage = role === 'administrador_condominio' || role === 'comite';
-            document.getElementById('show-map-modal-btn').style.display = canManage ? 'block' : 'none';
-            // Rest of Jardineria logic...
+            const showMapModalBtn = document.getElementById('show-map-modal-btn');
+            if(showMapModalBtn) showMapModalBtn.style.display = canManage ? 'block' : 'none';
+            
+            const mapContainer = document.getElementById('map-container');
+            const mapImage = document.getElementById('map-image');
+            const markerLayer = document.getElementById('marker-layer');
+            const mapSelector = document.getElementById('map-selector');
+            const deleteMapBtn = document.getElementById('delete-map-btn');
+
+            if (!mapContainer || !mapImage || !markerLayer || !mapSelector) return;
+
+            panzoomInstance = Panzoom(mapImage, { maxScale: 5, minScale: 0.5, contain: 'outside' });
+            mapContainer.addEventListener('wheel', panzoomInstance.zoomWithWheel);
+
+            const unsubMaps = onSnapshot(collection(db, 'maps'), snapshot => {
+                const maps = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                mapSelector.innerHTML = '<option value="">Seleccione un mapa...</option>' + maps.map(map => `<option value="${map.id}">${map.name}</option>`).join('');
+                if (activeMapId) mapSelector.value = activeMapId;
+            });
+            unsubscribeListeners.push(unsubMaps);
+
+            mapSelector.addEventListener('change', e => {
+                unsubscribeListeners = unsubscribeListeners.filter(unsub => unsub.toString().includes('markers')); // Unsubscribe previous marker listener
+                activeMapId = e.target.value;
+                if (activeMapId) {
+                    loadMap(activeMapId, role);
+                    if(deleteMapBtn) deleteMapBtn.style.display = canManage ? 'block' : 'none';
+                } else {
+                    mapImage.classList.add('hidden');
+                    document.getElementById('map-placeholder').style.display = 'block';
+                    markerLayer.innerHTML = '';
+                    if(deleteMapBtn) deleteMapBtn.style.display = 'none';
+                }
+            });
+            
+            if (deleteMapBtn) {
+                deleteMapBtn.addEventListener('click', () => {
+                    if (!activeMapId) return;
+                    showConfirmationModal('¿Estás seguro de que quieres eliminar este mapa y todos sus marcadores?', async () => {
+                        await deleteDoc(doc(db, 'maps', activeMapId));
+                        const markersSnapshot = await getDocs(collection(db, 'maps', activeMapId, 'markers'));
+                        await Promise.all(markersSnapshot.docs.map(markerDoc => deleteDoc(markerDoc.ref)));
+                        showAlert('Mapa eliminado.');
+                        activeMapId = null;
+                    });
+                });
+            }
+
+            document.getElementById('map-form')?.addEventListener('submit', async e => {
+                e.preventDefault();
+                const name = document.getElementById('map-name').value;
+                const file = document.getElementById('map-file').files[0];
+                if (!file) return showAlert('Por favor, selecciona un archivo.', 'error');
+                
+                const reader = new FileReader();
+                reader.onloadend = async () => {
+                    try {
+                        const docRef = await addDoc(collection(db, 'maps'), { name: name, imageUrl: reader.result, createdAt: serverTimestamp() });
+                        hideModal('mapModal');
+                        showAlert('Mapa cargado exitosamente.');
+                        mapSelector.value = docRef.id;
+                        mapSelector.dispatchEvent(new Event('change'));
+                    } catch (error) { showAlert('Error al cargar el mapa.', 'error'); }
+                };
+                reader.readAsDataURL(file);
+            });
+
+            mapContainer.addEventListener('click', async e => {
+                if (!activeMapId || !canManage || e.target !== mapImage) return;
+                const rect = mapImage.getBoundingClientRect();
+                const { scale } = panzoomInstance.getPan();
+                const x = (e.clientX - rect.left) / scale;
+                const y = (e.clientY - rect.top) / scale;
+                await addDoc(collection(db, 'maps', activeMapId, 'markers'), { x, y, status: 'pending', lastUpdated: serverTimestamp() });
+            });
         }
 
+        async function loadMap(mapId, role) {
+            const mapDoc = await getDoc(doc(db, 'maps', mapId));
+            if (!mapDoc.exists()) return showAlert('El mapa seleccionado no existe.', 'error');
+            
+            const mapData = mapDoc.data();
+            const mapImage = document.getElementById('map-image');
+            mapImage.src = mapData.imageUrl;
+            mapImage.classList.remove('hidden');
+            document.getElementById('map-placeholder').style.display = 'none';
+            document.getElementById('map-legend').classList.remove('hidden');
+            panzoomInstance.reset();
+
+            const unsubMarkers = onSnapshot(collection(db, 'maps', mapId, 'markers'), snapshot => {
+                const markerLayer = document.getElementById('marker-layer');
+                if (!markerLayer) return;
+                markerLayer.innerHTML = '';
+                snapshot.forEach(doc => createMarkerElement({ id: doc.id, ...doc.data() }, role));
+            });
+            unsubscribeListeners.push(unsubMarkers);
+        }
+
+        function createMarkerElement(marker, role) {
+            const markerEl = document.createElement('div');
+            markerEl.className = 'marker';
+            markerEl.style.left = `${marker.x}px`;
+            markerEl.style.top = `${marker.y}px`;
+            markerEl.style.backgroundColor = getMarkerColor(marker);
+            
+            const canManage = role === 'administrador_condominio' || role === 'comite';
+
+            markerEl.addEventListener('click', e => {
+                e.stopPropagation();
+                if (canManage) return; 
+                updateDoc(doc(db, 'maps', activeMapId, 'markers', marker.id), { status: 'done', lastUpdated: serverTimestamp() });
+            });
+
+            if (canManage) {
+                markerEl.addEventListener('contextmenu', e => {
+                    e.preventDefault(); e.stopPropagation();
+                    showConfirmationModal(`¿Seguro que quieres eliminar este marcador?`, () => deleteDoc(doc(db, 'maps', activeMapId, 'markers', marker.id)));
+                });
+            }
+            document.getElementById('marker-layer').appendChild(markerEl);
+        }
+
+        function getMarkerColor(marker) {
+            if (marker.status === 'pending') return '#ef4444'; // red-500
+            const lastUpdated = marker.lastUpdated.toDate();
+            const daysDiff = (new Date() - lastUpdated) / 86400000;
+            if (daysDiff <= 7) return '#22c55e';   // green-500
+            if (daysDiff <= 14) return '#facc15';  // yellow-400
+            if (daysDiff <= 30) return '#fb923c';  // orange-400
+            return '#A52A2A'; // Brown
+        }
 
         // --- GENERAL HELPERS ---
         function createModal(id, title, fields) {
@@ -518,7 +676,7 @@
         function showConfirmationModal(message, onConfirmCallback) {
             document.getElementById('confirmation-message').textContent = message;
             const confirmBtn = document.getElementById('confirm-action-btn');
-            const newConfirmBtn = confirmBtn.cloneNode(true); // Avoid multiple listeners
+            const newConfirmBtn = confirmBtn.cloneNode(true);
             confirmBtn.parentNode.replaceChild(newConfirmBtn, confirmBtn);
             newConfirmBtn.addEventListener('click', () => {
                 onConfirmCallback();
@@ -536,10 +694,17 @@
         }
         function navigate() {
             let hash = window.location.hash || '#dashboard';
+            const firstAllowedPage = document.querySelector('.nav-link[style*="display: flex"]')?.getAttribute('href');
+            if (document.querySelector(`.nav-link[href="${hash}"]`)?.style.display === 'none') {
+                hash = firstAllowedPage || '#dashboard';
+                window.location.hash = hash;
+            }
             document.querySelectorAll('.page').forEach(p => p.classList.toggle('active', `#${p.id}` === hash));
             document.querySelectorAll('.nav-link').forEach(l => l.classList.toggle('active', l.getAttribute('href') === hash));
-            const title = document.querySelector(`.nav-link.active span`)?.textContent || 'Dashboard';
-            document.getElementById('page-title').textContent = title;
+            document.getElementById('page-title').textContent = document.querySelector(`.nav-link.active span`)?.textContent || 'Dashboard';
+            
+            const sidebar = document.getElementById('sidebar');
+            document.getElementById('open-sidebar-btn').onclick = () => sidebar.classList.toggle('-translate-x-full');
         }
         function applyTheme(theme) {
             const isDark = theme === 'dark';
@@ -550,4 +715,5 @@
     </script>
 </body>
 </html>
+
 
