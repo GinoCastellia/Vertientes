@@ -220,7 +220,8 @@
             const prompt = document.getElementById('config-prompt');
             prompt.innerHTML = `<i class="fas fa-exclamation-triangle mr-2"></i> ${message}`;
             prompt.classList.remove('hidden');
-            document.querySelectorAll('#login-form button, #register-form button, #login-form input, #register-form input').forEach(el => el.disabled = true);
+            // The following line is the fix: I've commented it out so the inputs are NOT disabled.
+            // document.querySelectorAll('#login-form button, #register-form button, #login-form input, #register-form input').forEach(el => el.disabled = true);
         }
 
         if (initializeFirebase()) {
@@ -355,7 +356,15 @@
             if (allowed.includes('proveedores')) setupGenericListeners('proveedores', 'proveedores', createSimpleCard);
             if (allowed.includes('directorio')) setupGenericListeners('directorio', 'directorio', createSimpleCard);
             
-            window.addEventListener('load', () => applyTheme(localStorage.getItem('theme') || 'light'));
+            document.getElementById('theme-toggle').addEventListener('click', () => {
+                const newTheme = document.documentElement.classList.contains('dark') ? 'light' : 'dark';
+                localStorage.setItem('theme', newTheme);
+                applyTheme(newTheme);
+            });
+            window.addEventListener('load', () => {
+                applyTheme(localStorage.getItem('theme') || 'light');
+                navigate();
+            });
             window.addEventListener('hashchange', navigate);
         }
 
@@ -392,10 +401,98 @@
         }
 
         // SPECIFIC MODULE LISTENERS
-        function setupAdminListeners() { /* ... content from previous version ... */ }
-        function setupDashboardListeners() { /* ... */ }
-        function setupTareasListeners() { /* ... */ }
-        function setupJardineriaListeners(role) { /* ... */ }
+        function setupAdminListeners() {
+            const userList = document.getElementById('user-list');
+            const unsub = onSnapshot(collection(db, "users"), (snapshot) => {
+                if(!userList) return;
+                userList.innerHTML = snapshot.docs.map(doc => {
+                    const user = doc.data();
+                    return `<div class="flex justify-between items-center p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700"><span>${user.email} <span class="text-xs font-semibold bg-indigo-200 dark:bg-indigo-800 p-1 rounded">${roleNames[user.role]}</span></span><button class="text-red-500 hover:text-red-700 p-1" onclick="window.deleteUser('${doc.id}')"><i class="fas fa-trash-alt"></i></button></div>`;
+                }).join('');
+            });
+            unsubscribeListeners.push(unsub);
+            
+            document.getElementById('firebase-config-form')?.addEventListener('submit', e => {
+                e.preventDefault();
+                const configInput = document.getElementById('firebase-config-input');
+                try {
+                    JSON.parse(configInput.value); // Validate JSON
+                    localStorage.setItem('firebaseConfig', configInput.value);
+                    showAlert('Configuración guardada. La página se recargará.');
+                    setTimeout(() => window.location.reload(), 1500);
+                } catch (error) {
+                    showAlert('Error: El formato de la configuración no es válido.', 'error');
+                }
+            });
+
+            document.getElementById('user-form')?.addEventListener('submit', async e => {
+                e.preventDefault();
+                const email = document.getElementById('user-email').value;
+                const role = document.getElementById('user-role').value;
+                await setDoc(doc(db, "invitations", email), { role });
+                showAlert(`Invitación enviada a ${email}.`);
+                hideModal('user-modal');
+            });
+        }
+
+        function setupDashboardListeners() {
+            const unsubTasks = onSnapshot(collection(db, "tareas"), (snapshot) => {
+                const tasks = snapshot.docs.map(d => d.data());
+                const pending = tasks.filter(t => t.status !== 'completed').length;
+                document.getElementById('dashboard-tasks-count').textContent = pending;
+                
+                const upcoming = tasks.filter(t => t.status !== 'completed' && t.fecha_limite).sort((a,b) => new Date(a.fecha_limite) - new Date(b.fecha_limite)).slice(0, 3);
+                document.getElementById('upcoming-tasks-list').innerHTML = upcoming.length > 0 ? upcoming.map(t => `<div class="text-sm"><strong>${t.titulo}</strong><p class="text-xs text-slate-500">${t.fecha_limite}</p></div>`).join('') : '<p class="text-sm text-center text-slate-500">No hay tareas próximas.</p>';
+
+                if(tasksChart) tasksChart.destroy();
+                tasksChart = new Chart(document.getElementById('tasksChart').getContext('2d'), { type: 'doughnut', data: { labels: ['Por Hacer', 'En Progreso', 'Completado'], datasets: [{ data: [tasks.filter(t=>t.status==='todo').length, tasks.filter(t=>t.status==='in-progress').length, tasks.filter(t=>t.status==='completed').length], backgroundColor: ['#fb7185', '#facc15', '#4ade80'] }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } } });
+            });
+            const unsubInv = onSnapshot(collection(db, "inventario"), snapshot => {
+                const lowStock = snapshot.docs.filter(d => d.data().stock < d.data().stock_minimo).length;
+                document.getElementById('dashboard-low-stock-count').textContent = lowStock;
+            });
+            const unsubMaint = onSnapshot(collection(db, "mantenciones"), snapshot => {
+                const items = snapshot.docs.map(d => d.data());
+                document.getElementById('dashboard-urgent-count').textContent = items.filter(i => i.tipo === 'urgente').length;
+                if(maintenanceChart) maintenanceChart.destroy();
+                maintenanceChart = new Chart(document.getElementById('maintenanceChart').getContext('2d'), { type: 'bar', data: { labels: ['Planificadas', 'Urgentes'], datasets: [{ label: 'Mantenciones', data: [items.filter(i=>i.tipo === 'planificada').length, items.filter(i=>i.tipo === 'urgente').length], backgroundColor: ['#818cf8', '#f472b6'] }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } } });
+            });
+            unsubscribeListeners.push(unsubTasks, unsubInv, unsubMaint);
+        }
+        
+        function setupTareasListeners() {
+            const unsub = onSnapshot(collection(db, "tareas"), (snapshot) => {
+                const tasks = snapshot.docs.map(doc => ({id: doc.id, ...doc.data()}));
+                document.getElementById('tasks-todo').innerHTML = tasks.filter(t => t.status === 'todo').map(createTaskCard).join('');
+                document.getElementById('tasks-inprogress').innerHTML = tasks.filter(t => t.status === 'in-progress').map(createTaskCard).join('');
+                document.getElementById('tasks-completed').innerHTML = tasks.filter(t => t.status === 'completed').map(createTaskCard).join('');
+            });
+            unsubscribeListeners.push(unsub);
+            
+            document.getElementById('tareaModalForm')?.addEventListener('submit', async e => {
+                e.preventDefault();
+                const formData = new FormData(e.target);
+                const data = Object.fromEntries(formData.entries());
+                data.createdAt = serverTimestamp();
+                data.status = 'todo';
+                await addDoc(collection(db, "tareas"), data);
+                hideModal('tareaModal');
+                showAlert('Tarea creada.');
+            });
+        }
+        function createTaskCard(task) {
+            const priorityColors = { baja: 'bg-blue-200 text-blue-800', media: 'bg-yellow-200 text-yellow-800', alta: 'bg-red-200 text-red-800' };
+            return `<div class="card p-4"><div class="flex justify-between items-start"><div><h4 class="font-bold">${task.titulo}</h4><p class="text-xs text-slate-500">${task.asignado}</p></div><span class="text-xs font-bold px-2 py-1 rounded-full ${priorityColors[task.prioridad]}">${task.prioridad}</span></div><p class="text-sm mt-2">${task.descripcion}</p><p class="text-xs text-right mt-2 font-semibold">${task.fecha_limite}</p><div class="mt-2 pt-2 border-t flex gap-2">${task.status !== 'todo' ? `<button onclick="window.updateTaskStatus('${task.id}', 'todo')" class="text-xs p-1">To-Do</button>`:''}${task.status !== 'in-progress' ? `<button onclick="window.updateTaskStatus('${task.id}', 'in-progress')" class="text-xs p-1">Progreso</button>`:''}${task.status !== 'completed' ? `<button onclick="window.updateTaskStatus('${task.id}', 'completed')" class="text-xs p-1">Completar</button>`:''}</div></div>`;
+        }
+        window.updateTaskStatus = (id, status) => updateDoc(doc(db, 'tareas', id), { status });
+
+
+        function setupJardineriaListeners(role) {
+            const canManage = role === 'administrador_condominio' || role === 'comite';
+            document.getElementById('show-map-modal-btn').style.display = canManage ? 'block' : 'none';
+            // Rest of Jardineria logic...
+        }
+
 
         // --- GENERAL HELPERS ---
         function createModal(id, title, fields) {
@@ -407,7 +504,7 @@
                 if (inputType === 'textarea') {
                     field = `<textarea name="${key}" rows="3" class="form-input w-full"></textarea>`;
                 } else if (inputType === 'select') {
-                    field = `<select name="${key}" class="form-input w-full">${options.map(o => `<option value="${o.toLowerCase()}">${o}</option>`).join('')}</select>`;
+                    field = `<select name="${key}" class="form-input w-full">${options.map(o => `<option value="${o.toLowerCase().replace(' ','_')}">${o}</option>`).join('')}</select>`;
                 } else {
                     field = `<input type="${inputType}" name="${key}" class="form-input w-full">`;
                 }
@@ -417,10 +514,39 @@
         }
         window.showModal = (id) => document.getElementById(id)?.classList.remove('hidden');
         window.hideModal = (id) => document.getElementById(id)?.classList.add('hidden');
-        function showConfirmationModal(message, onConfirm) { /* ... */ }
-        function showAlert(message, type = 'success') { /* ... */ }
-        function navigate() { /* ... */ }
-        function applyTheme(theme) { /* ... */ }
+        
+        function showConfirmationModal(message, onConfirmCallback) {
+            document.getElementById('confirmation-message').textContent = message;
+            const confirmBtn = document.getElementById('confirm-action-btn');
+            const newConfirmBtn = confirmBtn.cloneNode(true); // Avoid multiple listeners
+            confirmBtn.parentNode.replaceChild(newConfirmBtn, confirmBtn);
+            newConfirmBtn.addEventListener('click', () => {
+                onConfirmCallback();
+                hideModal('confirmationModal');
+            });
+            document.getElementById('cancel-confirmation-btn').onclick = () => hideModal('confirmationModal');
+            showModal('confirmationModal');
+        }
+        function showAlert(message, type = 'success') {
+            const alertBox = document.getElementById('custom-alert');
+            alertBox.className = `fixed top-5 right-5 text-white py-2 px-4 rounded-lg shadow-lg z-50 ${type === 'error' ? 'bg-red-500' : type === 'warning' ? 'bg-yellow-500' : 'bg-green-500'}`;
+            document.getElementById('custom-alert-message').textContent = message;
+            alertBox.classList.remove('hidden');
+            setTimeout(() => alertBox.classList.add('hidden'), 4000);
+        }
+        function navigate() {
+            let hash = window.location.hash || '#dashboard';
+            document.querySelectorAll('.page').forEach(p => p.classList.toggle('active', `#${p.id}` === hash));
+            document.querySelectorAll('.nav-link').forEach(l => l.classList.toggle('active', l.getAttribute('href') === hash));
+            const title = document.querySelector(`.nav-link.active span`)?.textContent || 'Dashboard';
+            document.getElementById('page-title').textContent = title;
+        }
+        function applyTheme(theme) {
+            const isDark = theme === 'dark';
+            document.documentElement.classList.toggle('dark', isDark);
+            const themeToggle = document.getElementById('theme-toggle');
+            if(themeToggle) themeToggle.innerHTML = isDark ? '<i class="fas fa-sun text-xl"></i><span>Modo Claro</span>' : '<i class="fas fa-moon text-xl"></i><span>Modo Oscuro</span>';
+        }
     </script>
 </body>
 </html>
