@@ -220,8 +220,6 @@
             const prompt = document.getElementById('config-prompt');
             prompt.innerHTML = `<i class="fas fa-exclamation-triangle mr-2"></i> ${message}`;
             prompt.classList.remove('hidden');
-            // FIX: This line was preventing the initial admin login for configuration. It's now removed.
-            // document.querySelectorAll('#login-form button, #register-form button, #login-form input, #register-form input').forEach(el => el.disabled = true);
         }
 
         if (initializeFirebase()) {
@@ -260,6 +258,18 @@
                     appWrapper.classList.add('hidden');
                     unsubscribeListeners.forEach(unsub => unsub());
                     unsubscribeListeners = [];
+                    
+                    if (sessionStorage.getItem('justConfigured') === 'true') {
+                        sessionStorage.removeItem('justConfigured');
+                        showAlert('¡Configuración guardada! Ahora registra la cuenta del administrador.', 'success');
+                        toggleAuthForms('register');
+                        const registerEmailInput = document.getElementById('register-email');
+                        if (registerEmailInput) {
+                            registerEmailInput.value = ADMIN_EMAIL;
+                            registerEmailInput.readOnly = true;
+                        }
+                        document.getElementById('auth-subtitle').textContent = 'Completa el registro para finalizar la configuración.';
+                    }
                 }
             });
         }
@@ -277,7 +287,7 @@
                 await authFunc(auth, email, password);
             } catch (error) {
                 if (email.toLowerCase() === ADMIN_EMAIL && !localStorage.getItem('firebaseConfig')) {
-                    initializeAppUI('administrador_condominio', true); // Pass true for pre-config state
+                    initializeAppUI('administrador_condominio', true);
                     showAlert('Inicia sesión para configurar la aplicación.', 'warning');
                 } else {
                     errorP.textContent = "Error: " + error.code.replace('auth/', '').replace(/-/g, ' ');
@@ -297,6 +307,8 @@
             loginPrompt.classList.toggle('hidden', isRegister); registerPrompt.classList.toggle('hidden', !isRegister);
             authTitle.textContent = isRegister ? 'Crear Cuenta' : 'Bienvenido';
             authSubtitle.textContent = isRegister ? 'Únete a la plataforma para empezar.' : 'Ingresa tus credenciales para continuar.';
+            const registerEmailInput = document.getElementById('register-email');
+            if(registerEmailInput) registerEmailInput.readOnly = false; // Reset readOnly state
         }
 
         const permissions = {
@@ -351,7 +363,6 @@
         }
 
         function initializeAppListeners(role, isPreConfig = false) {
-            // FIX: Guard to prevent running listeners if db is not initialized.
             if (isPreConfig || !db) {
                 if (role === 'administrador_condominio') setupAdminListeners();
                 return;
@@ -456,6 +467,7 @@
                     if (!parsed.apiKey || !parsed.authDomain) throw new Error("Missing key properties");
                     
                     localStorage.setItem('firebaseConfig', jsonString);
+                    sessionStorage.setItem('justConfigured', 'true');
                     showAlert('Configuración guardada. La página se recargará.');
                     setTimeout(() => window.location.reload(), 1500);
                 } catch (error) {
@@ -724,5 +736,6 @@
     </script>
 </body>
 </html>
+
 
 
