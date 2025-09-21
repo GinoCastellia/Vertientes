@@ -187,7 +187,7 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, collection, doc, getDoc, setDoc, onSnapshot, deleteDoc, query, where, getDocs, addDoc, updateDoc, serverTimestamp, increment } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getFirestore, collection, doc, getDoc, setDoc, onSnapshot, deleteDoc, query, where, getDocs, addDoc, updateDoc, serverTimestamp, increment, enableIndexedDbPersistence } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
         
         let db, auth, currentUserRole = null;
         let unsubscribeListeners = [];
@@ -198,7 +198,7 @@
         const loginScreen = document.getElementById('login-screen');
         const appWrapper = document.getElementById('app-wrapper');
 
-        function initializeFirebase() {
+        async function initializeFirebase() {
             const storedConfig = localStorage.getItem('firebaseConfig');
             if (storedConfig) {
                 try {
@@ -207,10 +207,19 @@
                     tempApp = initializeApp(firebaseConfig, "secondary");
                     db = getFirestore(mainApp);
                     auth = getAuth(mainApp);
+                    // Enable offline persistence
+                    await enableIndexedDbPersistence(db);
                     return true;
                 } catch (e) {
-                    showConfigPrompt("La configuración de Firebase es inválida.");
-                    return false;
+                    if (e.code === 'failed-precondition') {
+                        // This happens if persistence is enabled in multiple tabs.
+                        console.warn("Firestore persistence can only be enabled in one tab at a time.");
+                    } else {
+                        console.error("Firebase initialization error:", e);
+                        showConfigPrompt("La configuración de Firebase es inválida.");
+                    }
+                    // Still return true if it's just a multi-tab issue
+                    return db != null;
                 }
             } else {
                 showConfigPrompt("Aplicación no configurada. Un admin debe iniciar sesión.");
@@ -224,57 +233,59 @@
             prompt.classList.remove('hidden');
         }
 
-        if (initializeFirebase()) {
-            onAuthStateChanged(auth, async (user) => {
-                if (user) {
-                    const userDoc = await getDoc(doc(db, "users", user.uid));
-                    if (userDoc.exists()) {
-                        currentUserRole = userDoc.data().role;
-                        initializeAppUI(currentUserRole);
-                    } else { // New user registration
-                        let roleToAssign = 'jardineria', message, messageType = 'success';
-                        if (user.email.toLowerCase() === ADMIN_EMAIL) {
-                            const adminSnapshot = await getDocs(query(collection(db, "users"), where("role", "==", "administrador_condominio")));
-                            roleToAssign = adminSnapshot.empty ? 'administrador_condominio' : 'jardineria';
-                            message = adminSnapshot.empty ? '¡Cuenta de Administrador creada!' : 'Un admin ya existe. Rol por defecto asignado.';
-                            if (!adminSnapshot.empty) messageType = 'warning';
-                        } else {
-                            message = 'Rol por defecto asignado.';
-                            messageType = 'warning';
-                        }
-
-                        try {
-                            await setDoc(doc(db, "users", user.uid), { email: user.email, role: roleToAssign, createdAt: serverTimestamp() });
-                            showAlert(message, messageType);
-                            currentUserRole = roleToAssign;
+        initializeFirebase().then(initialized => {
+            if (initialized) {
+                onAuthStateChanged(auth, async (user) => {
+                    if (user) {
+                        const userDoc = await getDoc(doc(db, "users", user.uid));
+                        if (userDoc.exists()) {
+                            currentUserRole = userDoc.data().role;
                             initializeAppUI(currentUserRole);
-                        } catch (error) {
-                            console.error("Error creating user document in Firestore:", error);
-                            showAlert("Error crítico: No se pudo crear el perfil de usuario. Revisa las reglas de seguridad de Firestore.", "error");
-                            signOut(auth);
+                        } else { // New user registration
+                            let roleToAssign = 'jardineria', message, messageType = 'success';
+                            if (user.email.toLowerCase() === ADMIN_EMAIL) {
+                                const adminSnapshot = await getDocs(query(collection(db, "users"), where("role", "==", "administrador_condominio")));
+                                roleToAssign = adminSnapshot.empty ? 'administrador_condominio' : 'jardineria';
+                                message = adminSnapshot.empty ? '¡Cuenta de Administrador creada!' : 'Un admin ya existe. Rol por defecto asignado.';
+                                if (!adminSnapshot.empty) messageType = 'warning';
+                            } else {
+                                message = 'Rol por defecto asignado.';
+                                messageType = 'warning';
+                            }
+
+                            try {
+                                await setDoc(doc(db, "users", user.uid), { email: user.email, role: roleToAssign, createdAt: serverTimestamp() });
+                                showAlert(message, messageType);
+                                currentUserRole = roleToAssign;
+                                initializeAppUI(currentUserRole);
+                            } catch (error) {
+                                console.error("Error creating user document in Firestore:", error);
+                                showAlert("Error crítico: No se pudo crear el perfil de usuario. Revisa las reglas de seguridad de Firestore.", "error");
+                                signOut(auth);
+                            }
+                        }
+                    } else {
+                        currentUserRole = null;
+                        loginScreen.classList.remove('hidden');
+                        appWrapper.classList.add('hidden');
+                        unsubscribeListeners.forEach(unsub => unsub());
+                        unsubscribeListeners = [];
+                        
+                        if (sessionStorage.getItem('justConfigured') === 'true') {
+                            sessionStorage.removeItem('justConfigured');
+                            showAlert('¡Configuración guardada! Ahora registra la cuenta del administrador.', 'success');
+                            toggleAuthForms('register');
+                            const registerEmailInput = document.getElementById('register-email');
+                            if (registerEmailInput) {
+                                registerEmailInput.value = ADMIN_EMAIL;
+                                registerEmailInput.readOnly = true;
+                            }
+                            document.getElementById('auth-subtitle').textContent = 'Completa el registro para finalizar la configuración.';
                         }
                     }
-                } else {
-                    currentUserRole = null;
-                    loginScreen.classList.remove('hidden');
-                    appWrapper.classList.add('hidden');
-                    unsubscribeListeners.forEach(unsub => unsub());
-                    unsubscribeListeners = [];
-                    
-                    if (sessionStorage.getItem('justConfigured') === 'true') {
-                        sessionStorage.removeItem('justConfigured');
-                        showAlert('¡Configuración guardada! Ahora registra la cuenta del administrador.', 'success');
-                        toggleAuthForms('register');
-                        const registerEmailInput = document.getElementById('register-email');
-                        if (registerEmailInput) {
-                            registerEmailInput.value = ADMIN_EMAIL;
-                            registerEmailInput.readOnly = true;
-                        }
-                        document.getElementById('auth-subtitle').textContent = 'Completa el registro para finalizar la configuración.';
-                    }
-                }
-            });
-        }
+                });
+            }
+        });
 
         document.getElementById('login-form').addEventListener('submit', e => { e.preventDefault(); handleAuth(signInWithEmailAndPassword, 'login-email', 'login-password'); });
         document.getElementById('register-form').addEventListener('submit', e => { e.preventDefault(); handleAuth(createUserWithEmailAndPassword, 'register-email', 'register-password'); });
@@ -573,9 +584,16 @@
             let map = L.map('leaflet-map').setView([fixedLatitude, fixedLongitude], 18);
             let drawnItems = new L.FeatureGroup().addTo(map);
 
-            L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-                attribution: 'Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community'
-            }).addTo(map);
+            const satelliteLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+                attribution: 'Tiles &copy; Esri'
+            });
+            const googleSatellite = L.tileLayer('http://{s}.google.com/vt/lyrs=s&x={x}&y={y}&z={z}',{
+                maxZoom: 20,
+                subdomains:['mt0','mt1','mt2','mt3'],
+                attribution: 'Map data &copy; Google'
+            });
+            
+            googleSatellite.addTo(map); // Default to Google Satellite
 
             if (canManage) {
                 let drawControl = new L.Control.Draw({
@@ -705,6 +723,7 @@
     </script>
 </body>
 </html>
+
 
 
 
