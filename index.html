@@ -362,7 +362,7 @@
                 createModal('proveedores', 'Proveedor', {nombre:'text', rubro:'text', contacto:'text', telefono:'tel', email:'email'}),
                 createModal('directorio', 'Contacto', {nombre:'text', cargo:'text', telefono:'tel', email:'email'}),
                 createModal('tarea', 'Nueva Tarea', {titulo:'text', descripcion:'textarea', asignado:'select:Administración,Mayordomo,Conserjería,Limpieza,Jardinería', fecha_limite:'date', prioridad:'select:Baja,Media,Alta'}),
-                createModal('gardeningZone', 'Nueva Zona de Jardinería', {nombre:'text'}) // Added modal for gardening
+                createModal('gardeningZone', 'Nueva Zona de Jardinería', {nombre:'text'})
             ].join('');
         }
 
@@ -388,11 +388,16 @@
                 localStorage.setItem('theme', newTheme);
                 applyTheme(newTheme);
             });
-            window.addEventListener('load', () => {
-                applyTheme(localStorage.getItem('theme') || 'light');
-                navigate();
-            });
+
+            document.getElementById('open-sidebar-btn').onclick = () => {
+                document.getElementById('sidebar').classList.toggle('-translate-x-full');
+            };
+            
             window.addEventListener('hashchange', navigate);
+            
+            // Initial navigation call after everything is set up
+            navigate(); 
+            applyTheme(localStorage.getItem('theme') || 'light');
         }
 
         // TEMPLATES (HTML generation)
@@ -681,20 +686,24 @@
             alertBox.classList.remove('hidden');
             setTimeout(() => alertBox.classList.add('hidden'), 4000);
         }
+        
         function navigate() {
             let hash = window.location.hash || '#dashboard';
             const firstAllowedPage = document.querySelector('.nav-link[style*="display: flex"]')?.getAttribute('href');
-            if (document.querySelector(`.nav-link[href="${hash}"]`)?.style.display === 'none') {
+
+            const targetLink = document.querySelector(`.nav-link[href="${hash}"]`);
+            const isAllowed = targetLink && targetLink.style.display !== 'none';
+
+            if (!isAllowed) {
                 hash = firstAllowedPage || '#dashboard';
-                window.location.hash = hash;
+                history.replaceState(null, null, ' ' + hash);
             }
+            
             document.querySelectorAll('.page').forEach(p => p.classList.toggle('active', `#${p.id}` === hash));
             document.querySelectorAll('.nav-link').forEach(l => l.classList.toggle('active', l.getAttribute('href') === hash));
             document.getElementById('page-title').textContent = document.querySelector(`.nav-link.active span`)?.textContent || 'Dashboard';
-            
-            const sidebar = document.getElementById('sidebar');
-            document.getElementById('open-sidebar-btn').onclick = () => sidebar.classList.toggle('-translate-x-full');
         }
+
         function applyTheme(theme) {
             const isDark = theme === 'dark';
             document.documentElement.classList.toggle('dark', isDark);
@@ -704,6 +713,7 @@
     </script>
 </body>
 </html>
+
 
 
 
