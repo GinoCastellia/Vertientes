@@ -207,7 +207,6 @@
                     tempApp = initializeApp(firebaseConfig, "secondary");
                     db = getFirestore(mainApp);
                     auth = getAuth(mainApp);
-                    // No storage initialization needed
                     return true;
                 } catch (e) {
                     showConfigPrompt("La configuración de Firebase es inválida.");
@@ -564,11 +563,18 @@
 
         function setupJardineriaListeners(role) {
             const canManage = role === 'administrador_condominio' || role === 'comite';
-            let map = L.map('leaflet-map').setView([-33.598, -70.578], 16); // Example coordinates
+            const mapElement = document.getElementById('leaflet-map');
+            if (!mapElement) return;
+
+            const fixedLatitude = -33.5982;
+            const fixedLongitude = -70.5785;
+            
+            mapElement.innerHTML = '';
+            let map = L.map('leaflet-map').setView([fixedLatitude, fixedLongitude], 18);
             let drawnItems = new L.FeatureGroup().addTo(map);
 
-            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+            L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+                attribution: 'Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community'
             }).addTo(map);
 
             if (canManage) {
@@ -623,7 +629,6 @@
             });
             unsubscribeListeners.push(unsubZones);
             
-            // Invalidate map size after it becomes visible
             setTimeout(() => map.invalidateSize(), 500);
         }
 
