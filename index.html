@@ -10,7 +10,12 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@panzoom/panzoom@4.5.1/dist/panzoom.min.js"></script>
+    <!-- LeafletJS for Interactive Maps -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    <!-- LeafletJS Draw Plugin for drawing zones -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css" />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js"></script>
     <style>
         :root {
             --bg-light: #f3e8ff; --bg-dark: #1e1b4b;
@@ -86,11 +91,7 @@
             background-color: #1e293b !important; color: #e2e8f0 !important; border-color: #334155;
         }
         html.dark .form-input:focus { box-shadow: 0 0 0 3px rgba(109, 40, 217, 0.3); }
-        #map-container { width: 100%; height: 75vh; cursor: crosshair; background-color: #e0e7ff; }
-        html.dark #map-container { background-color: #312e81; }
-        #map-image { touch-action: none; transform-origin: 0 0; }
-        .marker { position: absolute; width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: white; font-size: 14px; border: 2px solid white; box-shadow: 0 2px 8px rgba(0,0,0,0.4); transform: translate(-50%, -50%); cursor: pointer; transition: transform 0.2s, box-shadow 0.2s; }
-        .marker:hover { transform: translate(-50%, -50%) scale(1.2); box-shadow: 0 4px 12px rgba(0,0,0,0.5); }
+        #leaflet-map { width: 100%; height: 75vh; border-radius: 1.5rem; z-index: 10; }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
     </style>
 </head>
@@ -178,7 +179,7 @@
     
     <!-- MODALS -->
     <div id="confirmationModal" class="modal-backdrop fixed inset-0 flex items-center justify-center hidden"><div class="card w-11/12 md:w-1/3 p-6"><h3 class="text-xl font-semibold mb-4">Confirmación Requerida</h3><p id="confirmation-message" class="mb-6"></p><div class="flex justify-end gap-4"><button id="cancel-confirmation-btn" class="bg-gray-200 dark:bg-gray-600 p-2 rounded-lg">Cancelar</button><button id="confirm-action-btn" class="bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-4 rounded-lg">Confirmar</button></div></div></div>
-    <div id="user-modal" class="modal-backdrop fixed inset-0 flex items-center justify-center hidden"><div class="card w-11/12 md:w-1/3 p-6"><h3 class="text-xl font-semibold mb-4">Invitar Nuevo Usuario</h3><form id="user-form" class="space-y-4"><div><label>Email del invitado</label><input type="email" id="user-email" class="form-input w-full" required></div><div><label>Asignar Rol</label><select id="user-role" class="form-input w-full"><option value="jardineria">Jardinería</option><option value="mayordomo">Mayordomo</option><option value="comite">Comité</option><option value="administrador_condominio">Administrador de Condominio</option></select></div><p id="user-form-error" class="text-red-500 text-sm hidden"></p><div class="flex justify-end gap-4"><button type="button" onclick="hideModal('user-modal')" class="bg-gray-200 dark:bg-gray-600 p-2 rounded-lg">Cancelar</button><button type="submit" class="btn-primary p-2">Enviar Invitación</button></div></form></div></div>
+    <div id="user-modal" class="modal-backdrop fixed inset-0 flex items-center justify-center hidden"><div class="card w-11/12 md:w-1/3 p-6"><h3 id="user-modal-title" class="text-xl font-semibold mb-4">Crear Nuevo Usuario</h3><form id="user-form" class="space-y-4"><div><label>Email del usuario</label><input type="email" id="user-email" class="form-input w-full" required></div><div><label>Contraseña Inicial</label><input type="password" id="user-password" class="form-input w-full" required></div><div><label>Asignar Rol</label><select id="user-role" class="form-input w-full"><option value="jardineria">Jardinería</option><option value="mayordomo">Mayordomo</option><option value="comite">Comité</option><option value="administrador_condominio">Administrador de Condominio</option></select></div><p id="user-form-error" class="text-red-500 text-sm hidden"></p><div class="flex justify-end gap-4"><button type="button" onclick="hideModal('user-modal')" class="bg-gray-200 dark:bg-gray-600 p-2 rounded-lg">Cancelar</button><button type="submit" class="btn-primary p-2">Crear Usuario</button></div></form></div></div>
     <div id="custom-alert" class="hidden fixed top-5 right-5 bg-green-500 text-white py-2 px-4 rounded-lg shadow-lg z-50"><p id="custom-alert-message"></p></div>
     <!-- Generic Modals: Populated by JS -->
     <div id="genericModalContainer"></div>
@@ -189,9 +190,9 @@
         import { getFirestore, collection, doc, getDoc, setDoc, onSnapshot, deleteDoc, query, where, getDocs, addDoc, updateDoc, serverTimestamp, increment } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
         
         let db, auth, currentUserRole = null;
-        let panzoomInstance, activeMapId = null;
         let unsubscribeListeners = [];
         let tasksChart, maintenanceChart;
+        let tempApp; // For creating users without signing out the admin
         
         const ADMIN_EMAIL = "admin_gino@comite.cl";
         const loginScreen = document.getElementById('login-screen');
@@ -202,9 +203,11 @@
             if (storedConfig) {
                 try {
                     const firebaseConfig = JSON.parse(storedConfig);
-                    const app = initializeApp(firebaseConfig);
-                    db = getFirestore(app);
-                    auth = getAuth(app);
+                    const mainApp = initializeApp(firebaseConfig);
+                    tempApp = initializeApp(firebaseConfig, "secondary");
+                    db = getFirestore(mainApp);
+                    auth = getAuth(mainApp);
+                    // No storage initialization needed
                     return true;
                 } catch (e) {
                     showConfigPrompt("La configuración de Firebase es inválida.");
@@ -237,20 +240,20 @@
                             message = adminSnapshot.empty ? '¡Cuenta de Administrador creada!' : 'Un admin ya existe. Rol por defecto asignado.';
                             if (!adminSnapshot.empty) messageType = 'warning';
                         } else {
-                            const inv = await getDoc(doc(db, "invitations", user.email));
-                            if (inv.exists()) {
-                                roleToAssign = inv.data().role;
-                                message = `¡Bienvenido! Se te asignó el rol de ${roleNames[roleToAssign]}.`;
-                                await deleteDoc(inv.ref);
-                            } else {
-                                message = 'No se encontró invitación. Rol por defecto asignado.';
-                                messageType = 'warning';
-                            }
+                            message = 'Rol por defecto asignado.';
+                            messageType = 'warning';
                         }
-                        await setDoc(doc(db, "users", user.uid), { email: user.email, role: roleToAssign, createdAt: serverTimestamp() });
-                        showAlert(message, messageType);
-                        currentUserRole = roleToAssign;
-                        initializeAppUI(currentUserRole);
+
+                        try {
+                            await setDoc(doc(db, "users", user.uid), { email: user.email, role: roleToAssign, createdAt: serverTimestamp() });
+                            showAlert(message, messageType);
+                            currentUserRole = roleToAssign;
+                            initializeAppUI(currentUserRole);
+                        } catch (error) {
+                            console.error("Error creating user document in Firestore:", error);
+                            showAlert("Error crítico: No se pudo crear el perfil de usuario. Revisa las reglas de seguridad de Firestore.", "error");
+                            signOut(auth);
+                        }
                     }
                 } else {
                     currentUserRole = null;
@@ -395,13 +398,17 @@
         function getDashboardTemplate() { return `<div class="grid grid-cols-1 lg:grid-cols-3 gap-6"><div class="lg:col-span-2 space-y-6"><div class="grid grid-cols-1 md:grid-cols-3 gap-6"><div class="card p-6 bg-gradient-to-br from-red-500 to-orange-500 text-white shadow-lg"><p class="font-semibold">Mantenciones Urgentes</p><p id="dashboard-urgent-count" class="text-4xl font-extrabold mt-2">0</p></div><div class="card p-6 text-center"><p class="font-semibold">Tareas Pendientes</p><p id="dashboard-tasks-count" class="text-4xl font-extrabold mt-2">0</p></div><div class="card p-6 text-center"><p class="font-semibold">Bajo Stock</p><p id="dashboard-low-stock-count" class="text-4xl font-extrabold mt-2">0</p></div></div><div class="card p-6"><h3 class="font-semibold text-lg mb-4">Mantenciones por Tipo</h3><div class="h-80"><canvas id="maintenanceChart"></canvas></div></div></div><div class="space-y-6"><div class="card p-6"><h3 class="font-semibold text-lg mb-4">Tareas por Estado</h3><div class="h-48"><canvas id="tasksChart"></canvas></div></div><div class="card p-6"><h3 class="font-semibold text-lg mb-4">Próximas Tareas</h3><div id="upcoming-tasks-list" class="space-y-3"></div></div></div></div>`; }
         function getTareasTemplate() { return `<div class="flex justify-end mb-6"><button onclick="showModal('tareaModal')" class="btn-primary py-2 px-4"><i class="fas fa-plus mr-2"></i>Nueva Tarea</button></div><div class="grid grid-cols-1 md:grid-cols-3 gap-6"><div><h3 class="font-semibold text-lg mb-3 pb-2 border-b-2 border-pink-400">Por Hacer</h3><div id="tasks-todo" class="space-y-4 min-h-[200px]"></div></div><div><h3 class="font-semibold text-lg mb-3 pb-2 border-b-2 border-yellow-400">En Progreso</h3><div id="tasks-inprogress" class="space-y-4 min-h-[200px]"></div></div><div><h3 class="font-semibold text-lg mb-3 pb-2 border-b-2 border-green-400">Completado</h3><div id="tasks-completed" class="space-y-4 min-h-[200px]"></div></div></div>`; }
         function getGenericListTemplate(title, id, listClass) { return `<div class="flex justify-end mb-6"><button onclick="showModal('${id}Modal')" class="btn-primary py-2 px-4"><i class="fas fa-plus mr-2"></i>Añadir</button></div><div id="${id}-list" class="${listClass}"></div>`; }
-        function getAdminTemplate() { return `<div class="grid grid-cols-1 lg:grid-cols-2 gap-6"><div class="card p-6"><div class="flex justify-between items-center mb-4"><h3 class="text-xl font-bold">Gestión de Usuarios</h3><button onclick="showModal('user-modal')" class="btn-primary py-2 px-4"><i class="fas fa-user-plus mr-2"></i>Invitar</button></div><div id="user-list" class="space-y-3"></div></div><div class="card p-6"><h3 class="text-xl font-bold mb-4">Configuración de Conexión</h3><form id="firebase-config-form"><p class="text-sm mb-2 text-slate-600 dark:text-slate-300">Pega aquí el objeto de configuración de tu proyecto de Firebase.</p><textarea id="firebase-config-input" rows="10" class="form-input w-full font-mono text-xs" placeholder="{\n  apiKey: '...',\n  authDomain: '...',\n  ...\n}"></textarea><div class="flex justify-end mt-4"><button type="submit" class="btn-primary py-2 px-4">Guardar y Recargar</button></div></form></div></div>`; }
+        function getAdminTemplate() { return `<div class="grid grid-cols-1 lg:grid-cols-2 gap-6"><div class="card p-6"><div class="flex justify-between items-center mb-4"><h3 class="text-xl font-bold">Gestión de Usuarios</h3><button onclick="showModal('user-modal')" class="btn-primary py-2 px-4"><i class="fas fa-user-plus mr-2"></i>Crear Usuario</button></div><div id="user-list" class="space-y-3"></div></div><div class="card p-6"><h3 class="text-xl font-bold mb-4">Configuración de Conexión</h3><form id="firebase-config-form"><p class="text-sm mb-2 text-slate-600 dark:text-slate-300">Pega aquí el objeto de configuración de tu proyecto de Firebase.</p><textarea id="firebase-config-input" rows="10" class="form-input w-full font-mono text-xs" placeholder="{\n  apiKey: '...',\n  authDomain: '...',\n  ...\n}"></textarea><div class="flex justify-end mt-4"><button type="submit" class="btn-primary py-2 px-4">Guardar y Recargar</button></div></form></div></div>`; }
         function getJardineriaTemplate() { 
-            if (!document.getElementById('mapModal')) {
-                 const mapModalHTML = `<div id="mapModal" class="modal-backdrop fixed inset-0 flex items-center justify-center hidden"><div class="card w-11/12 md:w-1/3 p-6"><h3 class="text-xl font-semibold mb-4">Cargar Nuevo Mapa</h3><form id="map-form" class="space-y-4"><div><label>Nombre del Mapa</label><input type="text" id="map-name" class="form-input w-full" required></div><div><label>Archivo de Imagen (JPG, PNG)</label><input type="file" id="map-file" class="form-input w-full" accept="image/jpeg, image/png" required></div><div class="flex justify-end gap-4"><button type="button" onclick="hideModal('mapModal')" class="bg-gray-200 dark:bg-gray-600 p-2 rounded-lg">Cancelar</button><button type="submit" class="btn-primary p-2">Cargar</button></div></form></div></div>`;
-                 document.getElementById('genericModalContainer').insertAdjacentHTML('beforeend', mapModalHTML);
-            }
-            return `<div class="card p-6"><div class="flex flex-col sm:flex-row justify-between items-center mb-4 gap-4"><div class="flex items-center gap-3"><label for="map-selector" class="font-semibold">Mapa:</label><select id="map-selector" class="form-input rounded-lg"></select><button id="delete-map-btn" class="text-red-500 hover:text-red-700 hidden p-2"><i class="fas fa-trash-alt"></i></button></div><button id="show-map-modal-btn" onclick="showModal('mapModal')" class="btn-primary py-2 px-4 hidden"><i class="fas fa-plus mr-2"></i>Cargar Mapa</button></div><div class="relative"><div id="map-container" class="rounded-2xl shadow-inner overflow-hidden relative flex items-center justify-center"><img id="map-image" class="hidden"/><div id="marker-layer"></div><div id="map-placeholder" class="text-center text-slate-500"><i class="fas fa-map-marked-alt text-5xl mb-4"></i><p>Selecciona un mapa para empezar.</p></div></div><div id="map-legend" class="absolute bottom-4 left-4 card !rounded-xl p-3 text-xs space-y-2 hidden"><h4 class="font-bold text-sm mb-1">Leyenda</h4><div class="flex items-center gap-2"><div class="w-4 h-4 rounded-full bg-red-500 border border-white/50"></div><span>Pendiente</span></div><div class="flex items-center gap-2"><div class="w-4 h-4 rounded-full bg-green-500 border border-white/50"></div><span>Realizado (0-7d)</span></div><div class="flex items-center gap-2"><div class="w-4 h-4 rounded-full bg-yellow-400 border border-white/50"></div><span>Realizado (8-14d)</span></div><div class="flex items-center gap-2"><div class="w-4 h-4 rounded-full bg-orange-400 border border-white/50"></div><span>Realizado (15-30d)</span></div><div class="flex items-center gap-2"><div class="w-4 h-4 rounded-full" style="background-color: #A52A2A;"></div><span>Realizado (>30d)</span></div></div></div></div>`; 
+            return `<div class="card p-6">
+                <div class="flex flex-col sm:flex-row justify-between items-center mb-4 gap-4">
+                    <p class="text-sm text-slate-600 dark:text-slate-300">Utilice las herramientas del mapa para dibujar y gestionar las zonas de trabajo.</p>
+                </div>
+                <div class="relative">
+                    <div id="leaflet-map" class="rounded-2xl shadow-inner"></div>
+                    <div id="map-legend" class="absolute bottom-4 left-4 card !rounded-xl p-3 text-xs space-y-2 z-[1000]"><h4 class="font-bold text-sm mb-1">Leyenda</h4><div class="flex items-center gap-2"><div class="w-4 h-4 rounded-full bg-red-500 border border-white/50"></div><span>Pendiente</span></div><div class="flex items-center gap-2"><div class="w-4 h-4 rounded-full bg-green-500 border border-white/50"></div><span>Realizado (0-7d)</span></div><div class="flex items-center gap-2"><div class="w-4 h-4 rounded-full bg-yellow-400 border border-white/50"></div><span>Realizado (8-14d)</span></div><div class="flex items-center gap-2"><div class="w-4 h-4 rounded-full bg-orange-400 border border-white/50"></div><span>Realizado (15-30d)</span></div><div class="flex items-center gap-2"><div class="w-4 h-4 rounded-full" style="background-color: #A52A2A;"></div><span>Realizado (>30d)</span></div></div>
+                </div>
+            </div>`; 
         }
         
         // GENERIC LISTENERS & RENDERERS
@@ -432,7 +439,7 @@
         // SPECIFIC MODULE LISTENERS
         function setupAdminListeners() {
             const userList = document.getElementById('user-list');
-            if (db) { // Only listen if db is available
+            if (db) {
                 const unsub = onSnapshot(collection(db, "users"), (snapshot) => {
                     if(!userList) return;
                     userList.innerHTML = snapshot.docs.map(doc => {
@@ -446,9 +453,9 @@
             }
             
             window.deleteUser = (userId) => {
-                 showConfirmationModal('¿Seguro que quieres eliminar este usuario? Esta acción no se puede deshacer.', async () => {
+                 showConfirmationModal('¿Seguro que quieres eliminar este usuario?', async () => {
                     await deleteDoc(doc(db, "users", userId));
-                    showAlert('Usuario eliminado de la base de datos.');
+                    showAlert('Usuario eliminado de la base de datos (el acceso puede persistir).');
                  });
             };
 
@@ -457,15 +464,10 @@
                 const configInput = document.getElementById('firebase-config-input');
                 let configString = configInput.value.trim();
                 try {
-                    // FIX: Clean non-breaking spaces (invisible characters from copy-paste)
                     const cleanedString = configString.replace(/\u00A0/g, ' ');
-
-                    // This regex finds property names that are not in double quotes and adds them.
                     const jsonString = cleanedString.replace(/([{,]\s*)(\w+)\s*:/g, '$1"$2":');
-                    
                     const parsed = JSON.parse(jsonString);
                     if (!parsed.apiKey || !parsed.authDomain) throw new Error("Missing key properties");
-                    
                     localStorage.setItem('firebaseConfig', jsonString);
                     sessionStorage.setItem('justConfigured', 'true');
                     showAlert('Configuración guardada. La página se recargará.');
@@ -479,11 +481,32 @@
             document.getElementById('user-form')?.addEventListener('submit', async e => {
                 e.preventDefault();
                 const email = document.getElementById('user-email').value;
+                const password = document.getElementById('user-password').value;
                 const role = document.getElementById('user-role').value;
-                await setDoc(doc(db, "invitations", email), { role });
-                showAlert(`Invitación enviada a ${email}.`);
-                hideModal('user-modal');
-                e.target.reset();
+                const errorP = document.getElementById('user-form-error');
+                errorP.classList.add('hidden');
+
+                try {
+                    const tempAuth = getAuth(tempApp);
+                    const userCredential = await createUserWithEmailAndPassword(tempAuth, email, password);
+                    const newUserId = userCredential.user.uid;
+                    
+                    await setDoc(doc(db, "users", newUserId), {
+                        email: email,
+                        role: role,
+                        createdAt: serverTimestamp()
+                    });
+                    
+                    await signOut(tempAuth);
+                    
+                    showAlert(`Usuario ${email} creado exitosamente.`);
+                    hideModal('user-modal');
+                    e.target.reset();
+                } catch (error) {
+                    console.error("Error creating user:", error);
+                    errorP.textContent = error.code.replace('auth/', '').replace(/-/g, ' ');
+                    errorP.classList.remove('hidden');
+                }
             });
         }
 
@@ -541,131 +564,72 @@
 
         function setupJardineriaListeners(role) {
             const canManage = role === 'administrador_condominio' || role === 'comite';
-            const showMapModalBtn = document.getElementById('show-map-modal-btn');
-            if(showMapModalBtn) showMapModalBtn.style.display = canManage ? 'block' : 'none';
-            
-            const mapContainer = document.getElementById('map-container');
-            const mapImage = document.getElementById('map-image');
-            const markerLayer = document.getElementById('marker-layer');
-            const mapSelector = document.getElementById('map-selector');
-            const deleteMapBtn = document.getElementById('delete-map-btn');
+            let map = L.map('leaflet-map').setView([-33.598, -70.578], 16); // Example coordinates
+            let drawnItems = new L.FeatureGroup().addTo(map);
 
-            if (!mapContainer || !mapImage || !markerLayer || !mapSelector) return;
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+            }).addTo(map);
 
-            panzoomInstance = Panzoom(mapImage, { maxScale: 5, minScale: 0.5, contain: 'outside' });
-            mapContainer.addEventListener('wheel', panzoomInstance.zoomWithWheel);
+            if (canManage) {
+                let drawControl = new L.Control.Draw({
+                    draw: { polygon: true, marker: false, circle: false, polyline: false, rectangle: false, circlemarker: false },
+                    edit: { featureGroup: drawnItems }
+                });
+                map.addControl(drawControl);
 
-            const unsubMaps = onSnapshot(collection(db, 'maps'), snapshot => {
-                const maps = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-                mapSelector.innerHTML = '<option value="">Seleccione un mapa...</option>' + maps.map(map => `<option value="${map.id}">${map.name}</option>`).join('');
-                if (activeMapId) mapSelector.value = activeMapId;
-            });
-            unsubscribeListeners.push(unsubMaps);
-
-            mapSelector.addEventListener('change', e => {
-                unsubscribeListeners = unsubscribeListeners.filter(unsub => unsub.toString().includes('markers')); // Unsubscribe previous marker listener
-                activeMapId = e.target.value;
-                if (activeMapId) {
-                    loadMap(activeMapId, role);
-                    if(deleteMapBtn) deleteMapBtn.style.display = canManage ? 'block' : 'none';
-                } else {
-                    mapImage.classList.add('hidden');
-                    document.getElementById('map-placeholder').style.display = 'block';
-                    markerLayer.innerHTML = '';
-                    if(deleteMapBtn) deleteMapBtn.style.display = 'none';
-                }
-            });
-            
-            if (deleteMapBtn) {
-                deleteMapBtn.addEventListener('click', () => {
-                    if (!activeMapId) return;
-                    showConfirmationModal('¿Estás seguro de que quieres eliminar este mapa y todos sus marcadores?', async () => {
-                        await deleteDoc(doc(db, 'maps', activeMapId));
-                        const markersSnapshot = await getDocs(collection(db, 'maps', activeMapId, 'markers'));
-                        await Promise.all(markersSnapshot.docs.map(markerDoc => deleteDoc(markerDoc.ref)));
-                        showAlert('Mapa eliminado.');
-                        activeMapId = null;
+                map.on(L.Draw.Event.CREATED, function (event) {
+                    const layer = event.layer;
+                    const geoJSON = layer.toGeoJSON();
+                    showConfirmationModal('¿Guardar esta nueva zona?', async () => {
+                        await addDoc(collection(db, 'gardening_zones'), {
+                            geoJSON: geoJSON,
+                            status: 'pending',
+                            lastUpdated: serverTimestamp()
+                        });
+                        showAlert('Zona guardada.');
                     });
                 });
             }
 
-            document.getElementById('map-form')?.addEventListener('submit', async e => {
-                e.preventDefault();
-                const name = document.getElementById('map-name').value;
-                const file = document.getElementById('map-file').files[0];
-                if (!file) return showAlert('Por favor, selecciona un archivo.', 'error');
-                
-                const reader = new FileReader();
-                reader.onloadend = async () => {
-                    try {
-                        const docRef = await addDoc(collection(db, 'maps'), { name: name, imageUrl: reader.result, createdAt: serverTimestamp() });
-                        hideModal('mapModal');
-                        showAlert('Mapa cargado exitosamente.');
-                        mapSelector.value = docRef.id;
-                        mapSelector.dispatchEvent(new Event('change'));
-                    } catch (error) { showAlert('Error al cargar el mapa.', 'error'); }
-                };
-                reader.readAsDataURL(file);
-            });
-
-            mapContainer.addEventListener('click', async e => {
-                if (!activeMapId || !canManage || e.target !== mapImage) return;
-                const rect = mapImage.getBoundingClientRect();
-                const { scale } = panzoomInstance.getPan();
-                const x = (e.clientX - rect.left) / scale;
-                const y = (e.clientY - rect.top) / scale;
-                await addDoc(collection(db, 'maps', activeMapId, 'markers'), { x, y, status: 'pending', lastUpdated: serverTimestamp() });
-            });
-        }
-
-        async function loadMap(mapId, role) {
-            const mapDoc = await getDoc(doc(db, 'maps', mapId));
-            if (!mapDoc.exists()) return showAlert('El mapa seleccionado no existe.', 'error');
-            
-            const mapData = mapDoc.data();
-            const mapImage = document.getElementById('map-image');
-            mapImage.src = mapData.imageUrl;
-            mapImage.classList.remove('hidden');
-            document.getElementById('map-placeholder').style.display = 'none';
-            document.getElementById('map-legend').classList.remove('hidden');
-            panzoomInstance.reset();
-
-            const unsubMarkers = onSnapshot(collection(db, 'maps', mapId, 'markers'), snapshot => {
-                const markerLayer = document.getElementById('marker-layer');
-                if (!markerLayer) return;
-                markerLayer.innerHTML = '';
-                snapshot.forEach(doc => createMarkerElement({ id: doc.id, ...doc.data() }, role));
-            });
-            unsubscribeListeners.push(unsubMarkers);
-        }
-
-        function createMarkerElement(marker, role) {
-            const markerEl = document.createElement('div');
-            markerEl.className = 'marker';
-            markerEl.style.left = `${marker.x}px`;
-            markerEl.style.top = `${marker.y}px`;
-            markerEl.style.backgroundColor = getMarkerColor(marker);
-            
-            const canManage = role === 'administrador_condominio' || role === 'comite';
-
-            markerEl.addEventListener('click', e => {
-                e.stopPropagation();
-                if (canManage) return; 
-                updateDoc(doc(db, 'maps', activeMapId, 'markers', marker.id), { status: 'done', lastUpdated: serverTimestamp() });
-            });
-
-            if (canManage) {
-                markerEl.addEventListener('contextmenu', e => {
-                    e.preventDefault(); e.stopPropagation();
-                    showConfirmationModal(`¿Seguro que quieres eliminar este marcador?`, () => deleteDoc(doc(db, 'maps', activeMapId, 'markers', marker.id)));
+            const unsubZones = onSnapshot(collection(db, 'gardening_zones'), snapshot => {
+                drawnItems.clearLayers();
+                snapshot.forEach(docSnap => {
+                    const zone = { id: docSnap.id, ...docSnap.data() };
+                    const layer = L.geoJSON(zone.geoJSON, {
+                        style: {
+                            fillColor: getZoneColor(zone),
+                            weight: 2,
+                            opacity: 1,
+                            color: 'white',
+                            fillOpacity: 0.7
+                        }
+                    }).addTo(drawnItems);
+                    
+                    layer.on('click', () => {
+                        if(canManage) {
+                            showConfirmationModal('¿Estás seguro de que quieres eliminar esta zona?', () => {
+                                deleteDoc(doc(db, 'gardening_zones', zone.id));
+                                showAlert('Zona eliminada.');
+                            });
+                        } else {
+                            updateDoc(doc(db, 'gardening_zones', zone.id), {
+                                status: 'done',
+                                lastUpdated: serverTimestamp()
+                            });
+                        }
+                    });
                 });
-            }
-            document.getElementById('marker-layer').appendChild(markerEl);
+            });
+            unsubscribeListeners.push(unsubZones);
+            
+            // Invalidate map size after it becomes visible
+            setTimeout(() => map.invalidateSize(), 500);
         }
 
-        function getMarkerColor(marker) {
-            if (marker.status === 'pending') return '#ef4444'; // red-500
-            const lastUpdated = marker.lastUpdated.toDate();
+        function getZoneColor(zone) {
+            if (zone.status === 'pending') return '#ef4444'; // red-500
+            const lastUpdated = zone.lastUpdated.toDate();
             const daysDiff = (new Date() - lastUpdated) / 86400000;
             if (daysDiff <= 7) return '#22c55e';   // green-500
             if (daysDiff <= 14) return '#facc15';  // yellow-400
