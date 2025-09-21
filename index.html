@@ -362,6 +362,7 @@
                 createModal('proveedores', 'Proveedor', {nombre:'text', rubro:'text', contacto:'text', telefono:'tel', email:'email'}),
                 createModal('directorio', 'Contacto', {nombre:'text', cargo:'text', telefono:'tel', email:'email'}),
                 createModal('tarea', 'Nueva Tarea', {titulo:'text', descripcion:'textarea', asignado:'select:Administración,Mayordomo,Conserjería,Limpieza,Jardinería', fecha_limite:'date', prioridad:'select:Baja,Media,Alta'}),
+                createModal('gardeningZone', 'Nueva Zona de Jardinería', {nombre:'text'}) // Added modal for gardening
             ].join('');
         }
 
@@ -404,7 +405,7 @@
                 <div class="card p-6 flex flex-col">
                     <div class="flex justify-between items-center mb-4">
                         <h3 class="text-xl font-bold">Zonas de Trabajo</h3>
-                        <button id="add-zone-btn" class="btn-primary py-2 px-4 hidden"><i class="fas fa-plus mr-2"></i>Añadir Zona</button>
+                        <button id="add-zone-btn" class="btn-primary py-2 px-4 hidden" onclick="showModal('gardeningZoneModal')"><i class="fas fa-plus mr-2"></i>Añadir Zona</button>
                     </div>
                     <div id="gardening-zones-list" class="space-y-3 overflow-y-auto flex-grow"></div>
                 </div>
@@ -570,14 +571,18 @@
             const addZoneBtn = document.getElementById('add-zone-btn');
             if (addZoneBtn) addZoneBtn.style.display = canManage ? 'block' : 'none';
 
-            addZoneBtn?.addEventListener('click', () => {
-                const zoneName = prompt("Nombre de la nueva zona:");
+            document.getElementById('gardeningZoneModalForm')?.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const zoneName = e.target.nombre.value;
                 if (zoneName) {
-                    addDoc(collection(db, 'gardening_checklist'), {
+                    await addDoc(collection(db, 'gardening_checklist'), {
                         name: zoneName,
                         status: 'pending',
                         lastUpdated: serverTimestamp()
                     });
+                    showAlert('Zona añadida.');
+                    hideModal('gardeningZoneModal');
+                    e.target.reset();
                 }
             });
 
@@ -699,6 +704,7 @@
     </script>
 </body>
 </html>
+
 
 
 
