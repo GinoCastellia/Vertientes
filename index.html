@@ -92,6 +92,8 @@
         }
         html.dark .form-input:focus { box-shadow: 0 0 0 3px rgba(109, 40, 217, 0.3); }
         #leaflet-map { width: 100%; height: 75vh; border-radius: 1.5rem; z-index: 10; }
+        .leaflet-popup-content-wrapper { border-radius: 1rem; }
+        .leaflet-popup-content { margin: 1rem; }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
     </style>
 </head>
@@ -180,6 +182,7 @@
     <!-- MODALS -->
     <div id="confirmationModal" class="modal-backdrop fixed inset-0 flex items-center justify-center hidden"><div class="card w-11/12 md:w-1/3 p-6"><h3 class="text-xl font-semibold mb-4">Confirmación Requerida</h3><p id="confirmation-message" class="mb-6"></p><div class="flex justify-end gap-4"><button id="cancel-confirmation-btn" class="bg-gray-200 dark:bg-gray-600 p-2 rounded-lg">Cancelar</button><button id="confirm-action-btn" class="bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-4 rounded-lg">Confirmar</button></div></div></div>
     <div id="user-modal" class="modal-backdrop fixed inset-0 flex items-center justify-center hidden"><div class="card w-11/12 md:w-1/3 p-6"><h3 id="user-modal-title" class="text-xl font-semibold mb-4">Crear Nuevo Usuario</h3><form id="user-form" class="space-y-4"><div><label>Email del usuario</label><input type="email" id="user-email" class="form-input w-full" required></div><div><label>Contraseña Inicial</label><input type="password" id="user-password" class="form-input w-full" required></div><div><label>Asignar Rol</label><select id="user-role" class="form-input w-full"><option value="jardineria">Jardinería</option><option value="mayordomo">Mayordomo</option><option value="comite">Comité</option><option value="administrador_condominio">Administrador de Condominio</option></select></div><p id="user-form-error" class="text-red-500 text-sm hidden"></p><div class="flex justify-end gap-4"><button type="button" onclick="hideModal('user-modal')" class="bg-gray-200 dark:bg-gray-600 p-2 rounded-lg">Cancelar</button><button type="submit" class="btn-primary p-2">Crear Usuario</button></div></form></div></div>
+    <div id="zoneInfoModal" class="modal-backdrop fixed inset-0 flex items-center justify-center hidden"><div class="card w-11/12 md:w-1/3 p-6"><h3 class="text-xl font-semibold mb-4">Información de la Zona</h3><form id="zone-info-form" class="space-y-4"><div><label>Nombre de la Zona</label><input type="text" id="zone-name" class="form-input w-full" required></div><div><label>Descripción (Opcional)</label><textarea id="zone-description" rows="3" class="form-input w-full"></textarea></div><div class="flex justify-end gap-4"><button type="button" onclick="hideModal('zoneInfoModal')" class="bg-gray-200 dark:bg-gray-600 p-2 rounded-lg">Cancelar</button><button type="submit" class="btn-primary p-2">Guardar Zona</button></div></form></div></div>
     <div id="custom-alert" class="hidden fixed top-5 right-5 bg-green-500 text-white py-2 px-4 rounded-lg shadow-lg z-50"><p id="custom-alert-message"></p></div>
     <!-- Generic Modals: Populated by JS -->
     <div id="genericModalContainer"></div>
@@ -187,7 +190,7 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, collection, doc, getDoc, setDoc, onSnapshot, deleteDoc, query, where, getDocs, addDoc, updateDoc, serverTimestamp, increment, enableIndexedDbPersistence } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getFirestore, collection, doc, getDoc, setDoc, onSnapshot, deleteDoc, query, where, getDocs, addDoc, updateDoc, serverTimestamp, increment, enableIndexedDbPersistence, collectionGroup, orderBy, limit } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
         
         let db, auth, currentUserRole = null;
         let unsubscribeListeners = [];
@@ -207,18 +210,15 @@
                     tempApp = initializeApp(firebaseConfig, "secondary");
                     db = getFirestore(mainApp);
                     auth = getAuth(mainApp);
-                    // Enable offline persistence
                     await enableIndexedDbPersistence(db);
                     return true;
                 } catch (e) {
                     if (e.code === 'failed-precondition') {
-                        // This happens if persistence is enabled in multiple tabs.
                         console.warn("Firestore persistence can only be enabled in one tab at a time.");
                     } else {
                         console.error("Firebase initialization error:", e);
                         showConfigPrompt("La configuración de Firebase es inválida.");
                     }
-                    // Still return true if it's just a multi-tab issue
                     return db != null;
                 }
             } else {
@@ -575,25 +575,26 @@
         function setupJardineriaListeners(role) {
             const canManage = role === 'administrador_condominio' || role === 'comite';
             const mapElement = document.getElementById('leaflet-map');
-            if (!mapElement) return;
+            if (!mapElement || mapElement._leaflet_id) return; // Prevent re-initialization
 
             const fixedLatitude = -33.5982;
             const fixedLongitude = -70.5785;
+            const defaultZoom = 18;
+
+            const savedCenter = localStorage.getItem('savedMapCenter');
+            const savedZoom = localStorage.getItem('savedMapZoom');
+
+            const initialCenter = savedCenter ? JSON.parse(savedCenter) : [fixedLatitude, fixedLongitude];
+            const initialZoom = savedZoom ? parseInt(savedZoom, 10) : defaultZoom;
             
-            mapElement.innerHTML = '';
-            let map = L.map('leaflet-map').setView([fixedLatitude, fixedLongitude], 18);
+            let map = L.map('leaflet-map').setView(initialCenter, initialZoom);
             let drawnItems = new L.FeatureGroup().addTo(map);
 
-            const satelliteLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-                attribution: 'Tiles &copy; Esri'
-            });
-            const googleSatellite = L.tileLayer('http://{s}.google.com/vt/lyrs=s&x={x}&y={y}&z={z}',{
+            L.tileLayer('https://{s}.google.com/vt/lyrs=s&x={x}&y={y}&z={z}',{
                 maxZoom: 20,
                 subdomains:['mt0','mt1','mt2','mt3'],
                 attribution: 'Map data &copy; Google'
-            });
-            
-            googleSatellite.addTo(map); // Default to Google Satellite
+            }).addTo(map);
 
             if (canManage) {
                 let drawControl = new L.Control.Draw({
@@ -605,21 +606,40 @@
                 map.on(L.Draw.Event.CREATED, function (event) {
                     const layer = event.layer;
                     const geoJSON = layer.toGeoJSON();
-                    showConfirmationModal('¿Guardar esta nueva zona?', async () => {
+                    
+                    document.getElementById('zone-info-form').onsubmit = async (e) => {
+                        e.preventDefault();
+                        const name = document.getElementById('zone-name').value;
+                        const description = document.getElementById('zone-description').value;
+                        
                         await addDoc(collection(db, 'gardening_zones'), {
-                            geoJSON: geoJSON,
+                            name,
+                            description,
+                            geoJSON,
                             status: 'pending',
                             lastUpdated: serverTimestamp()
                         });
                         showAlert('Zona guardada.');
-                    });
+                        hideModal('zoneInfoModal');
+                        e.target.reset();
+                    };
+                    showModal('zoneInfoModal');
                 });
             }
 
-            const unsubZones = onSnapshot(collection(db, 'gardening_zones'), snapshot => {
+            const unsubZones = onSnapshot(collection(db, 'gardening_zones'), (snapshot) => {
                 drawnItems.clearLayers();
-                snapshot.forEach(docSnap => {
+                snapshot.forEach(async (docSnap) => {
                     const zone = { id: docSnap.id, ...docSnap.data() };
+                    
+                    // Fetch last log entry
+                    const logQuery = query(collection(db, `gardening_zones/${zone.id}/log`), orderBy("timestamp", "desc"), limit(1));
+                    const logSnapshot = await getDocs(logQuery);
+                    let lastLog = null;
+                    if (!logSnapshot.empty) {
+                        lastLog = logSnapshot.docs[0].data();
+                    }
+
                     const layer = L.geoJSON(zone.geoJSON, {
                         style: {
                             fillColor: getZoneColor(zone),
@@ -630,16 +650,49 @@
                         }
                     }).addTo(drawnItems);
                     
-                    layer.on('click', () => {
-                        if(canManage) {
-                            showConfirmationModal('¿Estás seguro de que quieres eliminar esta zona?', () => {
-                                deleteDoc(doc(db, 'gardening_zones', zone.id));
-                                showAlert('Zona eliminada.');
+                    let popupContent = `<div class="font-sans">
+                        <h3 class="font-bold text-lg mb-2">${zone.name || 'Zona sin nombre'}</h3>
+                        <p class="text-sm text-slate-600 mb-2">${zone.description || ''}</p>
+                        <hr class="my-2">`;
+                    
+                    if (lastLog) {
+                        popupContent += `<p class="text-xs"><strong>Última mantención:</strong> ${lastLog.timestamp.toDate().toLocaleDateString()}</p>
+                                         <p class="text-xs mb-3"><strong>Por:</strong> ${lastLog.userEmail.split('@')[0]}</p>`;
+                    } else {
+                        popupContent += `<p class="text-xs mb-3">Aún no hay registros de mantención.</p>`;
+                    }
+                    
+                    if (!canManage) {
+                        popupContent += `<button id="complete-zone-${zone.id}" class="btn-primary w-full py-2 text-sm">Marcar como Realizado</button>`;
+                    } else {
+                        popupContent += `<button id="delete-zone-${zone.id}" class="w-full py-2 text-sm bg-red-500 text-white rounded-lg">Eliminar Zona</button>`;
+                    }
+                    popupContent += `</div>`;
+                    
+                    layer.bindPopup(popupContent);
+
+                    layer.on('popupopen', () => {
+                        if (!canManage) {
+                            document.getElementById(`complete-zone-${zone.id}`)?.addEventListener('click', async () => {
+                                const user = auth.currentUser;
+                                const logRef = collection(db, `gardening_zones/${zone.id}/log`);
+                                await addDoc(logRef, {
+                                    timestamp: serverTimestamp(),
+                                    userId: user.uid,
+                                    userEmail: user.email
+                                });
+                                await updateDoc(doc(db, 'gardening_zones', zone.id), {
+                                    status: 'done',
+                                    lastUpdated: serverTimestamp()
+                                });
+                                map.closePopup();
                             });
                         } else {
-                            updateDoc(doc(db, 'gardening_zones', zone.id), {
-                                status: 'done',
-                                lastUpdated: serverTimestamp()
+                            document.getElementById(`delete-zone-${zone.id}`)?.addEventListener('click', () => {
+                                showConfirmationModal('¿Estás seguro de que quieres eliminar esta zona?', () => {
+                                    deleteDoc(doc(db, 'gardening_zones', zone.id));
+                                    showAlert('Zona eliminada.');
+                                });
                             });
                         }
                     });
@@ -647,6 +700,11 @@
             });
             unsubscribeListeners.push(unsubZones);
             
+            map.on('moveend zoomend', function() {
+                localStorage.setItem('savedMapCenter', JSON.stringify(map.getCenter()));
+                localStorage.setItem('savedMapZoom', map.getZoom());
+            });
+
             setTimeout(() => map.invalidateSize(), 500);
         }
 
@@ -723,6 +781,7 @@
     </script>
 </body>
 </html>
+
 
 
 
