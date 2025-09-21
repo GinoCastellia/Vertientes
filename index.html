@@ -446,8 +446,11 @@
                 const configInput = document.getElementById('firebase-config-input');
                 let configString = configInput.value.trim();
                 try {
+                    // FIX: Clean non-breaking spaces (invisible characters from copy-paste)
+                    const cleanedString = configString.replace(/\u00A0/g, ' ');
+
                     // This regex finds property names that are not in double quotes and adds them.
-                    const jsonString = configString.replace(/([{,]\s*)(\w+)\s*:/g, '$1"$2":');
+                    const jsonString = cleanedString.replace(/([{,]\s*)(\w+)\s*:/g, '$1"$2":');
                     
                     const parsed = JSON.parse(jsonString);
                     if (!parsed.apiKey || !parsed.authDomain) throw new Error("Missing key properties");
@@ -721,6 +724,5 @@
     </script>
 </body>
 </html>
-
 
 
