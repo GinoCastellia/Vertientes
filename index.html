@@ -444,13 +444,19 @@
             document.getElementById('firebase-config-form')?.addEventListener('submit', e => {
                 e.preventDefault();
                 const configInput = document.getElementById('firebase-config-input');
+                let configString = configInput.value.trim();
                 try {
-                    const parsed = JSON.parse(configInput.value);
+                    // This regex finds property names that are not in double quotes and adds them.
+                    const jsonString = configString.replace(/([{,]\s*)(\w+)\s*:/g, '$1"$2":');
+                    
+                    const parsed = JSON.parse(jsonString);
                     if (!parsed.apiKey || !parsed.authDomain) throw new Error("Missing key properties");
-                    localStorage.setItem('firebaseConfig', configInput.value);
+                    
+                    localStorage.setItem('firebaseConfig', jsonString);
                     showAlert('Configuración guardada. La página se recargará.');
                     setTimeout(() => window.location.reload(), 1500);
                 } catch (error) {
+                    console.error("Firebase config parsing error:", error);
                     showAlert('Error: El formato de la configuración no es válido.', 'error');
                 }
             });
@@ -715,5 +721,6 @@
     </script>
 </body>
 </html>
+
 
 
